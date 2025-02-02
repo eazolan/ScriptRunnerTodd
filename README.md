@@ -11,6 +11,10 @@ A Discord bot for automating options trading analysis scripts. This bot allows y
 
 ## Setup
 
+### Prerequisites
+- Python 3.8-3.11 (3.11 recommended)
+- Git
+
 1. Clone this repository
 2. Create a virtual environment and install dependencies:
 ```bash
@@ -30,6 +34,9 @@ pip install -r requirements.txt
    - Go to [Discord Developer Portal](https://discord.com/developers/applications)
    - Create a new application
    - Add a bot to the application
+   - Under "Bot" settings:
+     - Enable "Message Content Intent" under Privileged Gateway Intents
+     - Enable "Server Members Intent" if you need member-related features
    - Copy the bot token
 
 4. Configure the bot:
