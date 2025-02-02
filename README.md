@@ -14,8 +14,15 @@ A Discord bot for automating options trading analysis scripts. This bot allows y
 1. Clone this repository
 2. Create a virtual environment and install dependencies:
 ```bash
+# Create and activate virtual environment
 python -m venv .venv
 .venv\Scripts\activate  # On Windows
+# or source .venv/bin/activate  # On Linux/Mac
+
+# Make sure pip is up to date
+python -m pip install --upgrade pip
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
