@@ -1,19 +1,21 @@
 # Discord Configuration
 discord:
-  token: bot_token_here
+  token: removed
   command_prefix: "!"
   allowed_channels:
-    - general  # Optional: restrict bot to specific channels
+    - removed  # Optional: restrict bot to specific channels
 
 # Scripts Configuration
 scripts:
+  base_path: "path to /SchwabV2"
+  virtual_env: "path to /SchwabV2/.venv/Scripts/python.exe"
   data_collection:
-    path: "collect_data.py"
-    # Add any specific parameters your collection script needs
+    command: "collect-data"  # Using the entry point from setup.py
   analysis:
-    path: "analyze_options.py"
-    # Add any default parameters your analysis script needs
+    command: "analyze-options"  # Using the entry point from setup.py
+    default_args: []  # Any default arguments you want to always include
 
 # State Configuration
 state:
   file_path: "bot_state.json"
+

@@ -5,6 +5,55 @@ import json
 from datetime import datetime
 import os
 import yaml
+import asyncio
+import time
+
+
+async def run_script(cmd, cwd=None):
+    """Run a script asynchronously using asyncio with real-time output processing"""
+    try:
+        print(f"Running command: {cmd}")
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env={
+                **os.environ,
+                'PYTHONUNBUFFERED': '1'  # Disable Python output buffering
+            }
+        )
+
+        # Initialize output collectors
+        stdout_data = []
+        stderr_data = []
+
+        # Read output stream while process is running
+        async def read_stream(stream, collector):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                line_str = line.decode().strip()
+                collector.append(line_str)
+                print(f"Output: {line_str}")  # Print for debugging
+
+        # Create tasks for reading both streams
+        stdout_task = asyncio.create_task(read_stream(process.stdout, stdout_data))
+        stderr_task = asyncio.create_task(read_stream(process.stderr, stderr_data))
+
+        # Wait for the process to complete and streams to be fully read
+        await asyncio.gather(stdout_task, stderr_task)
+        await process.wait()
+
+        # Join the collected output
+        stdout_output = '\n'.join(stdout_data)
+        stderr_output = '\n'.join(stderr_data)
+
+        return process.returncode, stdout_output, stderr_output
+    except Exception as e:
+        print(f"Error in run_script: {e}")
+        return 1, "", str(e)
 
 
 def load_config():
@@ -49,32 +98,6 @@ def load_state():
 def save_state(state):
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f)
-
-
-class CustomHelpCommand(commands.HelpCommand):
-    async def send_bot_help(self, mapping):
-        embed = discord.Embed(
-            title="Script Runner Todd - Options Trading Bot",
-            description="Here are all available commands:",
-            color=discord.Color.blue()
-        )
-
-        for command in self.context.bot.commands:
-            embed.add_field(
-                name=f"{config['discord']['command_prefix']}{command.name}",
-                value=command.help or "No description available",
-                inline=False
-            )
-
-        await self.get_destination().send(embed=embed)
-
-    async def send_command_help(self, command):
-        embed = discord.Embed(
-            title=f"Command: {config['discord']['command_prefix']}{command.name}",
-            description=command.help or "No description available",
-            color=discord.Color.blue()
-        )
-        await self.get_destination().send(embed=embed)
 
 
 # Remove default help command and add our custom one
@@ -152,19 +175,25 @@ async def collect_data(ctx):
     This command runs the data collection script to fetch the latest
     options trading data. It must be run before analysis can be performed.
     """
+    print("Starting collection...")
+    
     # Check if channel is allowed (if configured)
     if 'allowed_channels' in config['discord'] and \
             ctx.channel.id not in config['discord']['allowed_channels']:
         return
 
-    await ctx.send("Starting data collection...")
+    status_message = await ctx.send("Starting data collection...")
+    progress_message = None
 
     try:
-        # Run your data collection script
-        result = subprocess.run(
-            ['python', config['scripts']['data_collection']['path']],
-            capture_output=True,
-            text=True
+        # Get the executable path
+        exe_path = config['scripts']['virtual_env'].replace('python.exe', 'collect-data.exe')
+        print(f"Using executable: {exe_path}")
+        
+        # Run the collection command
+        returncode, stdout, stderr = await run_script(
+            [exe_path],
+            cwd=config['scripts']['base_path']
         )
 
         # Update state
@@ -172,26 +201,56 @@ async def collect_data(ctx):
         state['last_run'] = datetime.now().isoformat()
         save_state(state)
 
-        if result.returncode == 0:
-            await ctx.send("✅ Data collection completed successfully!")
+        if returncode == 0:
+            await status_message.edit(content="✅ Data collection completed!")
+            
+            # Extract important information
+            output_lines = stdout.split('\n')
+            for line in output_lines:
+                if "Found" in line and "stocks with volume > 1M and > 5$" in line:
+                    await ctx.send(f"📊 {line.strip()}")
+                elif "Processing batch" in line:
+                    continue  # Skip batch processing messages
+                elif "Completed processing options" in line:
+                    await ctx.send(f"✨ {line.strip()}")
+                elif "Final row count in database" in line:
+                    await ctx.send(f"📈 {line.strip()}")
+
         else:
-            await ctx.send(f"❌ Error in data collection:\n```{result.stderr}```")
+            error_msg = stderr or "No error message available"
+            await status_message.edit(content=f"❌ Error in data collection:\n```{error_msg[:1900]}```")
 
     except Exception as e:
-        await ctx.send(f"❌ Error: {str(e)}")
+        await status_message.edit(content=f"❌ Error: {str(e)}")
+        print(f"Error details: {str(e)}")
 
 
 @bot.command(name='srt_analyze')
 async def analyze_options(ctx, *args):
     """Analyzes collected options data with specified filters.
 
-    Usage: !srt_analyze [filters]
-    Example: !srt_analyze --min-volume 100 --max-strike 50
+    Usage: 
+    For put options:
+        !srt_analyze puts -f <funds> -r <results>
+        Example: !srt_analyze puts -f 10000 -r 20
+
+    For call options:
+        !srt_analyze calls <symbol>
+        Example: !srt_analyze calls AAPL
+
+    Arguments:
+    puts mode:
+        -f, --funds: Available funds for trading
+        -r, --results: Number of top results to show (optional, default: 10)
+        --include-nonstandard: Include non-standard options (optional)
+
+    calls mode:
+        symbol: Stock symbol to analyze for covered calls
+        --include-nonstandard: Include non-standard options (optional)
 
     The analysis will use the most recently collected data.
     Run !srt_collect first if you need fresh data.
     """
-    # Check if channel is allowed (if configured)
     if 'allowed_channels' in config['discord'] and \
             ctx.channel.id not in config['discord']['allowed_channels']:
         return
@@ -201,22 +260,37 @@ async def analyze_options(ctx, *args):
         await ctx.send("⚠️ No data collected yet. Please run !srt_collect first.")
         return
 
+    if not args:
+        await ctx.send("⚠️ Please specify 'puts' or 'calls' and required arguments. Use !srt_help srt_analyze for more information.")
+        return
+
     await ctx.send("Starting analysis...")
 
     try:
-        # Construct command with arguments
-        cmd = ['python', config['scripts']['analysis']['path']] + list(args)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Get the executable path
+        exe_path = config['scripts']['virtual_env'].replace('python.exe', 'analyze-options.exe')
+        cmd = [exe_path] + list(args)
+        print(f"Using command: {cmd}")
+        
+        # Run the analysis command
+        returncode, stdout, stderr = await run_script(
+            cmd,
+            cwd=config['scripts']['base_path']
+        )
 
-        if result.returncode == 0:
-            # Format the output nicely for Discord
-            output = f"Analysis Results:\n```{result.stdout}```"
-            await ctx.send(output)
+        if returncode == 0:
+            # Split output into chunks if it's too long for Discord
+            output = stdout or "No output generated"
+            chunks = [output[i:i+1900] for i in range(0, len(output), 1900)]
+            for chunk in chunks:
+                await ctx.send(f"```{chunk}```")
         else:
-            await ctx.send(f"❌ Error in analysis:\n```{result.stderr}```")
+            error_msg = stderr or "No error message available"
+            await ctx.send(f"❌ Error in analysis:\n```{error_msg[:1900]}```")
 
     except Exception as e:
         await ctx.send(f"❌ Error: {str(e)}")
+        print(f"Error details: {str(e)}")
 
 
 @bot.command(name='srt_status')
@@ -226,24 +300,44 @@ async def check_status(ctx):
     This command displays the timestamp of the most recent
     data collection and how long ago it was performed.
     """
+    print("Status command started")
+    print(f"Command received in channel: {ctx.channel.name} (ID: {ctx.channel.id})")
+
     # Check if channel is allowed (if configured)
-    if 'allowed_channels' in config['discord'] and \
-            ctx.channel.id not in config['discord']['allowed_channels']:
-        return
+    if 'allowed_channels' in config['discord']:
+        allowed_channels = config['discord']['allowed_channels']
+        print(f"Allowed channels configured: {allowed_channels}")
+        if ctx.channel.id not in allowed_channels:
+            print(f"Channel {ctx.channel.id} not in allowed list")
+            await ctx.send("❌ This command can only be used in designated channels.")
+            return
 
-    state = load_state()
-    last_run = state.get('last_run')
+    print("Channel check passed or no channel restrictions")
 
-    if last_run:
-        last_run_dt = datetime.fromisoformat(last_run)
-        time_diff = datetime.now() - last_run_dt
-        await ctx.send(f"Last data collection: {last_run_dt.strftime('%Y-%m-%d %H:%M:%S')} "
-                       f"({time_diff.seconds // 3600} hours {(time_diff.seconds // 60) % 60} minutes ago)")
-    else:
-        await ctx.send("No data has been collected yet.")
+    try:
+        print(f"Looking for state file: {STATE_FILE}")
+        if not os.path.exists(STATE_FILE):
+            print("State file does not exist")
+            await ctx.send("No data has been collected yet. Use !srt_collect to fetch new data.")
+            return
+
+        state = load_state()
+        print(f"Loaded state: {state}")
+        last_run = state.get('last_run')
+        print(f"Last run: {last_run}")
+
+        if last_run:
+            last_run_dt = datetime.fromisoformat(last_run)
+            time_diff = datetime.now() - last_run_dt
+            await ctx.send(f"Last data collection: {last_run_dt.strftime('%Y-%m-%d %H:%M:%S')} "
+                          f"({time_diff.seconds // 3600} hours {(time_diff.seconds // 60) % 60} minutes ago)")
+        else:
+            await ctx.send("No data has been collected yet. Use !srt_collect to fetch new data.")
+    except Exception as e:
+        print(f"Error in status command: {str(e)}")
+        await ctx.send(f"❌ Error checking status: {str(e)}")
 
 
 if __name__ == "__main__":
     # Run the bot with token from config
     bot.run(config['discord']['token'])
-    
