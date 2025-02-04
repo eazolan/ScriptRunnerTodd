@@ -3,10 +3,15 @@ from discord.ext import commands
 import subprocess
 import json
 from datetime import datetime
+import sys
 import os
 import yaml
 import asyncio
 import time
+from discord.ext.commands import is_owner
+import logging
+
+logging.getLogger('discord').setLevel(logging.WARNING)  # Reduce Discord.py logging verbosity
 
 
 async def run_script(cmd, cwd=None):
@@ -71,18 +76,29 @@ intents.message_content = True  # Needed to read message content
 intents.members = True  # Needed for member-related features
 
 
-# Bot configuration
 class MyBot(commands.Bot):
+    def __init__(self):
+        super().__init__(
+            command_prefix=config['discord']['command_prefix'],
+            intents=intents
+        )
+        self._restart_flag = False
+    
     async def setup_hook(self):
         print(f"Bot setup completed!")
         for command in self.commands:
             print(f'Registered command: {self.command_prefix}{command.name}')
+    
+    async def close(self):
+        """Cleanly close the bot connection"""
+        if self._restart_flag:
+            print("Restarting bot...")
+        else:
+            print("Shutting down bot...")
+        await super().close()
 
-
-bot = MyBot(
-    command_prefix=config['discord']['command_prefix'],
-    intents=intents
-)
+# Initialize bot
+bot = MyBot()
 
 # State tracking
 STATE_FILE = config['state']['file_path']
@@ -140,6 +156,39 @@ async def help_command(ctx, command_name=None):
 
     await ctx.send(embed=embed)
 
+@bot.command(name='srt_restart')
+@commands.is_owner()
+async def restart_bot(ctx):
+    """Restarts the bot.
+    
+    This command can only be used by the bot owner.
+    It will safely shut down the bot and start it again.
+    """
+    try:
+        # Set restart flag
+        bot._restart_flag = True
+        
+        # Start new process
+        script_path = os.path.abspath(__file__)
+        python_executable = sys.executable
+        subprocess.Popen([python_executable, script_path])
+        
+        # Send a single message and close bot
+        await ctx.send("🔄 Restarting bot... I'll be back in a moment!")
+        
+        # Brief pause to ensure message is sent
+        await asyncio.sleep(1)
+        await bot.close()
+        
+        # Exit without triggering traceback
+        os._exit(0)
+        
+    except Exception as e:
+        bot._restart_flag = False
+        await ctx.send(f"❌ Error during restart: {str(e)}")
+        print(f"Restart error: {str(e)}")
+        return
+
 
 @bot.event
 async def on_ready():
@@ -147,6 +196,12 @@ async def on_ready():
     print(f'Connected to {len(bot.guilds)} guilds:')
     for guild in bot.guilds:
         print(f' - {guild.name} (id: {guild.id})')
+        # If allowed_channels is configured, send startup message to those channels
+        if 'allowed_channels' in config['discord']:
+            for channel_id in config['discord']['allowed_channels']:
+                channel = guild.get_channel(channel_id)
+                if channel:
+                    await channel.send("🟢 ScriptRunnerTodd is now online and ready!")
     print(f'Available commands: {[command.name for command in bot.commands]}')
 
 
@@ -338,6 +393,11 @@ async def check_status(ctx):
         await ctx.send(f"❌ Error checking status: {str(e)}")
 
 
+# Modify your main block to include error handling
 if __name__ == "__main__":
-    # Run the bot with token from config
-    bot.run(config['discord']['token'])
+    try:
+        bot.run(config['discord']['token'])
+    except KeyboardInterrupt:
+        print("\nBot shutdown via keyboard interrupt")
+    except Exception as e:
+        print(f"Error running bot: {str(e)}")

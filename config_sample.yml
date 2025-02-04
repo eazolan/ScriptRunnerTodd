@@ -2,6 +2,7 @@
 discord:
   token: removed
   command_prefix: "!"
+  owner_id: removed # Owner is the only one with permission to run !srt_restart
   allowed_channels:
     - removed  # Optional: restrict bot to specific channels
 
