@@ -65,14 +65,17 @@ python SRT_main.py
 
 ### Available Commands
 
-- `!collect` - Collect fresh options data from the market
-- `!analyze [filters]` - Analyze collected data with optional filters
-- `!status` - Check when data was last collected
-- `!help` - Show available commands and usage information
+- `!srt_collect` - Collect fresh options data from the market
+- `!srt_analyze [puts/calls]` - Analyze collected data with optional filters
+- `!srt_status` - Check when data was last collected
+- `!srt_help` - Show available commands and usage information
+- `!srt_restart` - Owner-only command to restart the bot (useful for maintenance or recovery)
+
 
 Example:
 ```
-!analyze --min-volume 100 --max-strike 50
+!srt_analyze puts -f 19000 -r 20
+!srt_analyze calls aapl
 ```
 
 ## Security Notes
