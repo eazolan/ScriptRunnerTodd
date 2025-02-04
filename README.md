@@ -2,6 +2,14 @@
 
 A Discord bot for automating options trading analysis scripts. This bot allows you to remotely trigger data collection and analysis through Discord commands.
 
+## Related Projects
+
+This bot is designed to work with [SchwabV2](https://github.com/eazolan/SchwabV2), a collection of scripts for options trading analysis. ScriptRunnerTodd provides a Discord interface to trigger and manage these analysis scripts remotely.
+
+To use this bot effectively:
+1. First install and configure [SchwabV2](https://github.com/eazolan/SchwabV2)
+2. Then set up this bot following the instructions below
+
 ## Features
 
 - Run data collection scripts remotely via Discord
