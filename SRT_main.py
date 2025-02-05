@@ -251,6 +251,22 @@ async def collect_data(ctx):
             cwd=config['scripts']['base_path']
         )
 
+        # Check for refresh token expiration
+        if "The refresh token has expired!" in stdout:
+            error_embed = discord.Embed(
+                title="🔑 API Authentication Required",
+                description="The Schwab API token has expired and needs to be refreshed.",
+                color=discord.Color.red()
+            )
+            error_embed.add_field(
+                name="Required Action",
+                value="A server administrator needs to manually re-authenticate on the server. Please contact them to resolve this issue.",
+                inline=False
+            )
+            await status_message.edit(content="")
+            await ctx.send(embed=error_embed)
+            return
+
         # Update state
         state = load_state()
         state['last_run'] = datetime.now().isoformat()
@@ -277,7 +293,7 @@ async def collect_data(ctx):
 
     except Exception as e:
         await status_message.edit(content=f"❌ Error: {str(e)}")
-        print(f"Error details: {str(e)}")
+        print(f"Error details: {str(e)}"))
 
 
 @bot.command(name='srt_analyze')
