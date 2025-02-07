@@ -293,7 +293,7 @@ async def collect_data(ctx):
 
     except Exception as e:
         await status_message.edit(content=f"❌ Error: {str(e)}")
-        print(f"Error details: {str(e)}"))
+        print(f"Error details: {str(e)}")
 
 
 @bot.command(name='srt_analyze')
